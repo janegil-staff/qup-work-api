@@ -20,6 +20,7 @@ const contractSchema = new Schema(
     description: String,
 
     priceType: { type: String, enum: ['fixed', 'hourly', 'estimate'], required: true },
+    // Contract prices are what the customer pays, i.e. INCLUDING VAT
     totalAmount: { type: Number, min: 0 }, // øre (fixed/estimate)
     hourlyRate: { type: Number, min: 0 }, // øre (hourly)
     currency: { type: String, default: 'NOK' },

@@ -1,0 +1,202 @@
+// /qup-work-api/src/controllers/job.controller.js
+import { Job, Offer } from '../models/index.js';
+import { AppError } from '../utils/AppError.js';
+import { pick, getPagination, paginate, geoFilter } from '../utils/http.js';
+import {
+  assertCompanyRole, getMyCompanyIds, isJobOwner, loadClient, loadJob,
+} from '../utils/access.js';
+
+const JOB_FIELDS = [
+  'title', 'description', 'category', 'workType', 'address', 'location', 'images', 'budget', 'timing',
+];
+const MARKETPLACE_FIELDS = ['visibility', 'invitedPros'];
+
+const jobPopulate = [
+  { path: 'category', select: 'name slug icon' },
+  { path: 'client', select: 'name phone email address' },
+  { path: 'customer', select: 'name avatarUrl' },
+  { path: 'pro', select: 'name avatarUrl' },
+];
+
+// What pros see before they're hired: no street address, location rounded to ~1 km
+function publicJobView(job) {
+  const out = { ...job };
+  if (out.address) out.address = { postalCode: out.address.postalCode, city: out.address.city, municipality: out.address.municipality };
+  if (out.location?.coordinates) {
+    out.location = {
+      ...out.location,
+      coordinates: out.location.coordinates.map((n) => Math.round(n * 100) / 100),
+    };
+  }
+  delete out.invitedPros;
+  delete out.client;
+  return out;
+}
+
+const withUploader = (images, uid) => images?.map((i) => ({ ...i, uploadedBy: uid }));
+
+// POST /jobs
+//   with "client" → direct job (pro registers work for their own client)
+//   without       → marketplace job (customer asks for offers)
+export const createJob = async (req, res) => {
+  const uid = req.user._id;
+  const body = req.body ?? {};
+  const data = pick(body, JOB_FIELDS);
+  if (data.images) data.images = withUploader(data.images, uid);
+
+  let job;
+  if (body.client) {
+    if (!req.user.roles.includes('pro')) throw AppError.forbidden('Only pros can create jobs for clients');
+    const client = await loadClient(req, body.client);
+    const company = body.company ?? client.company;
+    if (company) await assertCompanyRole(req, company);
+
+    job = new Job({
+      ...data,
+      source: 'direct',
+      createdBy: uid,
+      client: client._id,
+      pro: uid,
+      company,
+      visibility: 'private',
+    });
+    // Default to the client's address
+    if (!data.address && client.address) job.address = client.address.toObject();
+    if (!data.location && client.location) job.location = client.location.toObject();
+  } else {
+    job = new Job({
+      ...data,
+      ...pick(body, MARKETPLACE_FIELDS),
+      source: 'marketplace',
+      createdBy: uid,
+      customer: uid,
+    });
+    if (!body.visibility) job.visibility = 'public';
+  }
+
+  await job.save();
+  res.status(201).json({ job });
+};
+
+// GET /jobs?role=customer|pro&status=open,assigned&client=
+export const listMyJobs = async (req, res) => {
+  const uid = req.user._id;
+  const role = req.query.role ?? req.user.activeRole;
+
+  let filter;
+  if (role === 'pro') {
+    const ids = await getMyCompanyIds(req);
+    filter = { $or: [{ pro: uid }, { company: { $in: ids } }] };
+  } else {
+    filter = { customer: uid };
+  }
+  if (req.query.status) filter.status = { $in: String(req.query.status).split(',') };
+  if (req.query.client) filter.client = req.query.client;
+
+  res.json(
+    await paginate(Job, filter, getPagination(req.query), {
+      sort: { createdAt: -1 },
+      populate: jobPopulate,
+    })
+  );
+};
+
+// GET /jobs/feed?category=&workType=&lng=&lat=&radiusKm=   (pros: open marketplace jobs)
+export const jobFeed = async (req, res) => {
+  const uid = req.user._id;
+  const filter = {
+    source: 'marketplace',
+    status: 'open',
+    customer: { $ne: uid },
+    $or: [{ visibility: 'public' }, { visibility: 'invited', invitedPros: uid }],
+  };
+  if (req.query.category) filter.category = { $in: String(req.query.category).split(',') };
+  if (req.query.workType) filter.workType = req.query.workType;
+  Object.assign(filter, geoFilter(req.query, 'location') ?? {});
+
+  const result = await paginate(Job, filter, getPagination(req.query), {
+    sort: { publishedAt: -1 },
+    populate: [
+      { path: 'category', select: 'name slug icon' },
+      { path: 'customer', select: 'name avatarUrl' },
+    ],
+  });
+
+  // Tell the app which jobs I've already sent an offer on
+  const myOffers = await Offer.find({ job: { $in: result.data.map((j) => j._id) }, pro: uid })
+    .select('job status')
+    .lean();
+  const offerByJob = new Map(myOffers.map((o) => [String(o.job), o.status]));
+
+  result.data = result.data.map((j) => ({
+    ...publicJobView(j.toJSON()),
+    myOfferStatus: offerByJob.get(String(j._id)) ?? null,
+  }));
+  res.json(result);
+};
+
+// GET /jobs/:jobId
+export const getJob = async (req, res) => {
+  const { job, side } = await loadJob(req, req.params.jobId, { allowViewer: true });
+  await job.populate(jobPopulate);
+  const json = job.toJSON();
+  res.json({ job: side === 'viewer' ? publicJobView(json) : json, side });
+};
+
+// PATCH /jobs/:jobId
+export const updateJob = async (req, res) => {
+  const { job, side } = await loadJob(req, req.params.jobId);
+  if (!isJobOwner(job, side)) throw AppError.forbidden();
+  if (!['draft', 'open'].includes(job.status)) {
+    throw new AppError('A job can only be edited while it is a draft or open', 409);
+  }
+
+  const data = pick(req.body, JOB_FIELDS);
+  if (data.images) data.images = withUploader(data.images, req.user._id);
+  job.set(data);
+  if (job.source === 'marketplace') job.set(pick(req.body, MARKETPLACE_FIELDS));
+  await job.save();
+  res.json({ job });
+};
+
+// POST /jobs/:jobId/publish → marketplace: draft → open
+export const publishJob = async (req, res) => {
+  const { job, side } = await loadJob(req, req.params.jobId);
+  if (job.source !== 'marketplace') throw new AppError('Only marketplace jobs can be published', 400);
+  if (!isJobOwner(job, side)) throw AppError.forbidden();
+  if (job.status !== 'draft') throw new AppError('Only draft jobs can be published', 409);
+
+  job.status = 'open';
+  job.publishedAt = new Date();
+  await job.save();
+  // TODO (push step): notify pros nearby in this category
+  res.json({ job });
+};
+
+// POST /jobs/:jobId/cancel
+export const cancelJob = async (req, res) => {
+  const { job, side } = await loadJob(req, req.params.jobId);
+  if (!isJobOwner(job, side)) throw AppError.forbidden();
+  if (job.contract) throw new AppError('This job has a contract, cancel the contract instead', 409);
+  if (['completed', 'cancelled'].includes(job.status)) {
+    throw new AppError(`Job is already ${job.status}`, 409);
+  }
+
+  job.status = 'cancelled';
+  job.closedAt = new Date();
+  await job.save();
+  await Offer.updateMany(
+    { job: job._id, status: 'pending' },
+    { status: 'rejected', respondedAt: new Date() }
+  );
+  res.json({ job });
+};
+
+// DELETE /jobs/:jobId → only drafts
+export const deleteJob = async (req, res) => {
+  const { job, side } = await loadJob(req, req.params.jobId);
+  if (!isJobOwner(job, side)) throw AppError.forbidden();
+  if (job.status !== 'draft') throw new AppError('Only draft jobs can be deleted, cancel it instead', 409);
+  await job.deleteOne();
+  res.status(204).end();
+};

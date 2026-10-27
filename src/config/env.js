@@ -1,8 +1,16 @@
 // /qup-work-api/src/config/env.js
 // One place to read and validate environment variables.
+// /qup-work-api/src/config/env.js
+// One place to read and validate environment variables.
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const required = ['MONGO_URI'];
+// Load .env from the project root, however the server is started (nodemon, npm, debugger).
+// On hosting platforms there is no .env file and real environment variables are used instead.
+const envFile = fileURLToPath(new URL('../../.env', import.meta.url));
+if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
+const required = ['MONGO_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
 for (const key of required) {
   if (!process.env[key]) {
     throw new Error(`Missing required env variable: ${key} (did you create .env?)`);
@@ -18,4 +26,12 @@ export const env = {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean),
+
+  jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? '15m',
+  refreshTokenTtl: process.env.REFRESH_TOKEN_TTL ?? '30d',
+
+  // Our cut on marketplace jobs paid through the app (percent)
+  platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? 8),
 };

@@ -47,7 +47,8 @@ companySchema.index({ orgNumber: 1 }, { unique: true, sparse: true });
 companySchema.index({ 'members.user': 1 });
 
 companySchema.methods.getMemberRole = function (userId) {
-  const m = this.members.find((x) => x.user.toString() === userId.toString());
+  const idOf = (v) => String(v?._id ?? v); // works whether members.user is populated or not
+  const m = this.members.find((x) => idOf(x.user) === idOf(userId));
   return m?.role ?? null;
 };
 

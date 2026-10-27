@@ -1,0 +1,63 @@
+// /qup-work-api/src/controllers/client.controller.js
+// Phase 1: a pro's own customer register.
+import { Client, Job } from '../models/index.js';
+import { pick, getPagination, paginate, escapeRegex } from '../utils/http.js';
+import { assertCompanyRole, defaultCompanyId, getMyCompanyIds, loadClient } from '../utils/access.js';
+
+const CLIENT_FIELDS = [
+  'type', 'name', 'contactPerson', 'orgNumber', 'email', 'phone',
+  'address', 'location', 'notes', 'tags', 'company', 'archived',
+];
+
+// GET /clients?q=&archived=true
+export const listClients = async (req, res) => {
+  const ids = await getMyCompanyIds(req);
+  const filter = {
+    $or: [{ owner: req.user._id }, { company: { $in: ids } }],
+    archived: req.query.archived === 'true',
+  };
+  if (req.query.q) filter.name = { $regex: escapeRegex(String(req.query.q)), $options: 'i' };
+
+  res.json(await paginate(Client, filter, getPagination(req.query), { sort: { name: 1 } }));
+};
+
+// POST /clients
+export const createClient = async (req, res) => {
+  const data = pick(req.body, CLIENT_FIELDS);
+  data.company = data.company ?? (await defaultCompanyId(req));
+  if (data.company) await assertCompanyRole(req, data.company);
+  const client = await Client.create({ ...data, owner: req.user._id });
+  res.status(201).json({ client });
+};
+
+// GET /clients/:clientId  (includes the client's latest jobs)
+export const getClient = async (req, res) => {
+  const client = await loadClient(req, req.params.clientId);
+  const jobs = await Job.find({ client: client._id })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .select('title status createdAt contract');
+  res.json({ client, jobs });
+};
+
+// PATCH /clients/:clientId
+export const updateClient = async (req, res) => {
+  const client = await loadClient(req, req.params.clientId);
+  const data = pick(req.body, CLIENT_FIELDS);
+  if (data.company) await assertCompanyRole(req, data.company);
+  client.set(data);
+  await client.save();
+  res.json({ client });
+};
+
+// DELETE /clients/:clientId → archived if it has jobs, deleted otherwise
+export const deleteClient = async (req, res) => {
+  const client = await loadClient(req, req.params.clientId);
+  if (await Job.exists({ client: client._id })) {
+    client.archived = true;
+    await client.save();
+    return res.json({ client, archived: true });
+  }
+  await client.deleteOne();
+  res.status(204).end();
+};

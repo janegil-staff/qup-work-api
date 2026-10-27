@@ -24,8 +24,10 @@ const invoiceSchema = new Schema(
   {
     company: { type: Schema.Types.ObjectId, ref: 'Company', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    number: { type: Number, required: true }, // from company.invoiceSettings.nextInvoiceNumber
-    kid: String, // KID number for bank payments
+    // Assigned when the invoice is SENT (drafts have no number), so issued invoices
+    // are numbered without gaps as Norwegian bookkeeping rules require.
+    number: Number,
+    kid: String, // KID number for bank payments, generated with the number
 
     client: { type: Schema.Types.ObjectId, ref: 'Client' },
     customer: { type: Schema.Types.ObjectId, ref: 'User' },
@@ -81,8 +83,17 @@ invoiceSchema.pre('validate', function () {
   }
 });
 
-invoiceSchema.index({ company: 1, number: 1 }, { unique: true });
+invoiceSchema.index(
+  { company: 1, number: 1 },
+  { unique: true, partialFilterExpression: { number: { $type: 'number' } } }
+);
 invoiceSchema.index({ company: 1, status: 1, dueDate: 1 });
 invoiceSchema.index({ client: 1, issueDate: -1 });
+
+invoiceSchema.virtual('isOverdue').get(function () {
+  return ['sent', 'overdue'].includes(this.status) && this.dueDate < new Date();
+});
+
+invoiceSchema.set('toJSON', { virtuals: true, versionKey: false });
 
 export const Invoice = mongoose.model('Invoice', invoiceSchema);
