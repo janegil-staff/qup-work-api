@@ -21,6 +21,21 @@ async function assertMilestone(milestoneId, contract) {
   }
 }
 
+// Hours added or edited by hand: real dates, not in the future, at most one day long.
+// (A running timer that was forgotten can run longer; it's fixed by editing it afterwards.)
+const MAX_ENTRY_MS = 24 * 60 * 60 * 1000;
+const FUTURE_GRACE_MS = 5 * 60 * 1000; // phone clocks drift a little
+function assertManualTimes(startedAt, endedAt) {
+  const start = new Date(startedAt);
+  const end = new Date(endedAt);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new AppError('startedAt and endedAt must be valid dates', 400);
+  }
+  if (end <= start) throw new AppError('End time must be after start time', 400);
+  if (end.getTime() > Date.now() + FUTURE_GRACE_MS) throw new AppError('Hours cannot be logged in the future', 400);
+  if (end - start > MAX_ENTRY_MS) throw new AppError('One entry can be at most 24 hours', 400);
+}
+
 // Own entries, or any entry in a company where I'm owner/admin
 async function loadEditableEntry(req, entryId) {
   const entry = await TimeEntry.findById(entryId);
@@ -76,7 +91,7 @@ export const stopTimer = async (req, res) => {
 export const getRunningTimer = async (req, res) => {
   const entry = await TimeEntry.findOne({ user: req.user._id, running: true }).populate(
     'contract',
-    'title'
+    'title status'
   );
   res.json({ entry: entry ?? null });
 };
@@ -138,6 +153,7 @@ export const createTimeEntry = async (req, res) => {
   const contract = await loadProContract(req, body.contract);
   await assertMilestone(body.milestone, contract);
   if (!body.startedAt || !body.endedAt) throw new AppError('startedAt and endedAt are required', 400);
+  assertManualTimes(body.startedAt, body.endedAt);
 
   const entry = await TimeEntry.create({
     ...pick(body, ['milestone', 'startedAt', 'endedAt', 'breakMinutes', 'note', 'billable']),
@@ -154,6 +170,10 @@ export const updateTimeEntry = async (req, res) => {
   const entry = await loadEditableEntry(req, req.params.entryId);
   const data = pick(req.body, ['milestone', 'startedAt', 'endedAt', 'breakMinutes', 'note', 'billable']);
   if (data.milestone) await assertMilestone(data.milestone, { _id: entry.contract });
+  if (data.startedAt || data.endedAt) {
+    const endedAt = data.endedAt ?? entry.endedAt;
+    if (endedAt) assertManualTimes(data.startedAt ?? entry.startedAt, endedAt);
+  }
 
   entry.set(data);
   await entry.save();

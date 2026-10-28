@@ -30,6 +30,9 @@ let sectionFailed = false;
 
 class CheckError extends Error {}
 
+// Return SKIPPED from a step when it doesn't apply (e.g. uploads switched off)
+const SKIPPED = Symbol('skipped');
+
 function check(condition, message) {
   if (!condition) throw new CheckError(message);
 }
@@ -77,6 +80,11 @@ async function step(name, fn) {
   }
   try {
     const value = await fn();
+    if (value === SKIPPED) {
+      results.skipped++;
+      console.log(`  ⏭️  ${name} (skipped)`);
+      return undefined;
+    }
     results.passed++;
     console.log(`  ✅ ${name}`);
     return value;
@@ -171,8 +179,8 @@ async function main() {
     const res = await api(user('pro').token, 'POST', '/uploads/signature', { purpose: 'milestone' });
     if (res.status === 503) {
       S.uploadsOff = true;
-      console.log('       ℹ️  CLOUDINARY_* is not set in .env, so photo uploads are off');
-      return;
+      console.log('       ℹ️  The server says photo uploads are off: set CLOUDINARY_* in .env and RESTART the server');
+      return SKIPPED;
     }
     const data = expectStatus(res, 200);
     check(data.signature && data.timestamp && data.apiKey && data.cloudName, 'signature fields missing');
@@ -180,7 +188,7 @@ async function main() {
     S.sig = data;
   });
   await step('a test photo uploads to Cloudinary with that signature', async () => {
-    if (S.uploadsOff) return;
+    if (S.uploadsOff) return SKIPPED;
     const form = new FormData();
     form.append('file', TINY_PNG);
     form.append('api_key', S.sig.apiKey);
@@ -195,7 +203,7 @@ async function main() {
     S.uploadedKey = data.public_id;
   });
   await step('an unknown upload purpose is refused (400)', async () => {
-    if (S.uploadsOff) return;
+    if (S.uploadsOff) return SKIPPED;
     expectStatus(await api(user('pro').token, 'POST', '/uploads/signature', { purpose: 'anything' }), 400);
   });
 
@@ -271,6 +279,27 @@ async function main() {
     S.manualEntry = data.entry._id;
     check(data.entry.minutes === 150, `minutes is ${data.entry.minutes}`);
   });
+  await step('hours in the future are refused (400)', async () => {
+    const start = new Date(Date.now() + 2 * 3600000);
+    expectStatus(
+      await api(user('pro').token, 'POST', '/time-entries', {
+        contract: S.directContract,
+        startedAt: start.toISOString(),
+        endedAt: new Date(start.getTime() + 3600000).toISOString(),
+      }),
+      400
+    );
+  });
+  await step('one entry longer than 24 hours is refused (400)', async () => {
+    expectStatus(
+      await api(user('pro').token, 'POST', '/time-entries', {
+        contract: S.directContract,
+        startedAt: '2026-10-20T08:00:00.000Z',
+        endedAt: '2026-10-21T09:00:00.000Z',
+      }),
+      400
+    );
+  });
   await step('contract shows 150 billable minutes', async () => {
     const data = expectStatus(await api(user('pro').token, 'GET', `/contracts/${S.directContract}`), 200);
     check(data.hours.billableMinutes === 150, `billableMinutes is ${data.hours.billableMinutes}`);
@@ -288,7 +317,7 @@ async function main() {
     check(data.milestone.attachments.length === 1, 'attachment missing');
   });
   await step('attachments from other websites are refused (400)', async () => {
-    if (S.uploadsOff) return; // without Cloudinary any https URL is allowed
+    if (S.uploadsOff) return SKIPPED; // without Cloudinary any https URL is allowed
     const base = `/contracts/${S.directContract}/milestones/${S.directMilestone}`;
     expectStatus(
       await api(user('pro').token, 'POST', `${base}/attachments`, {
@@ -691,6 +720,13 @@ async function main() {
       await api(user('outsider').token, 'POST', `/jobs/${S.marketJob}/offers`, { priceType: 'fixed', amount: 1 }),
       denied
     );
+  });
+  await step('customer can read the hours on their contract', async () => {
+    const data = expectStatus(
+      await api(user('customer').token, 'GET', `/time-entries?contract=${S.marketContract}`),
+      200
+    );
+    check(Array.isArray(data.data) && data.totals, 'hours list or totals missing');
   });
   await step('customer can\'t log hours on the contract', async () => {
     expectStatus(
