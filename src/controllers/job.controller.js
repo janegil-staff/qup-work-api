@@ -1,7 +1,7 @@
 // /qup-work-api/src/controllers/job.controller.js
-import { Job, Offer } from '../models/index.js';
+import { Job, Offer, Category } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
-import { pick, getPagination, paginate, geoFilter } from '../utils/http.js';
+import { pick, getPagination, paginate, geoFilter, escapeRegex } from '../utils/http.js';
 import {
   assertCompanyRole, defaultCompanyId, getMyCompanyIds, isJobOwner, loadClient, loadJob,
 } from '../utils/access.js';
@@ -18,7 +18,8 @@ const jobPopulate = [
   { path: 'pro', select: 'name avatarUrl' },
 ];
 
-// What pros see before they're hired: no street address, location rounded to ~1 km
+// What everyone sees before a pro is hired: no street address, location rounded to ~1 km,
+// only the customer's first name
 function publicJobView(job) {
   const out = { ...job };
   if (out.address) out.address = { postalCode: out.address.postalCode, city: out.address.city, municipality: out.address.municipality };
@@ -28,9 +29,19 @@ function publicJobView(job) {
       coordinates: out.location.coordinates.map((n) => Math.round(n * 100) / 100),
     };
   }
+  if (out.customer?.name) {
+    out.customer = { _id: out.customer._id, name: out.customer.name.split(' ')[0], avatarUrl: out.customer.avatarUrl };
+  }
   delete out.invitedPros;
   delete out.client;
   return out;
+}
+
+// ?category=<id>,<id> → those categories plus their subcategories
+async function categoryFilter(param) {
+  const ids = String(param).split(',').filter(Boolean);
+  const children = await Category.find({ parent: { $in: ids } }).select('_id').lean();
+  return { $in: [...ids, ...children.map((c) => c._id)] };
 }
 
 const withUploader = (images, uid) => images?.map((i) => ({ ...i, uploadedBy: uid }));
@@ -101,17 +112,21 @@ export const listMyJobs = async (req, res) => {
   );
 };
 
-// GET /jobs/feed?category=&workType=&lng=&lat=&radiusKm=   (pros: open marketplace jobs)
+// GET /jobs/feed?q=&category=&workType=&lng=&lat=&radiusKm=   (public: open marketplace jobs)
+// Logged in: also invited jobs, without my own jobs, and with myOfferStatus per job
 export const jobFeed = async (req, res) => {
-  const uid = req.user._id;
+  const uid = req.user?._id;
   const filter = {
     source: 'marketplace',
     status: 'open',
-    customer: { $ne: uid },
-    $or: [{ visibility: 'public' }, { visibility: 'invited', invitedPros: uid }],
+    $or: uid
+      ? [{ visibility: 'public' }, { visibility: 'invited', invitedPros: uid }]
+      : [{ visibility: 'public' }],
   };
-  if (req.query.category) filter.category = { $in: String(req.query.category).split(',') };
+  if (uid) filter.customer = { $ne: uid };
+  if (req.query.category) filter.category = await categoryFilter(req.query.category);
   if (req.query.workType) filter.workType = req.query.workType;
+  if (req.query.q) filter.title = { $regex: escapeRegex(String(req.query.q)), $options: 'i' };
   Object.assign(filter, geoFilter(req.query, 'location') ?? {});
 
   const result = await paginate(Job, filter, getPagination(req.query), {
@@ -123,9 +138,11 @@ export const jobFeed = async (req, res) => {
   });
 
   // Tell the app which jobs I've already sent an offer on
-  const myOffers = await Offer.find({ job: { $in: result.data.map((j) => j._id) }, pro: uid })
-    .select('job status')
-    .lean();
+  const myOffers = uid
+    ? await Offer.find({ job: { $in: result.data.map((j) => j._id) }, pro: uid })
+        .select('job status')
+        .lean()
+    : [];
   const offerByJob = new Map(myOffers.map((o) => [String(o.job), o.status]));
 
   result.data = result.data.map((j) => ({
@@ -135,12 +152,32 @@ export const jobFeed = async (req, res) => {
   res.json(result);
 };
 
-// GET /jobs/:jobId
+// GET /jobs/:jobId   (public for open marketplace jobs)
+// side: 'guest' | 'viewer' (logged in, not involved) | 'customer' | 'pro'
 export const getJob = async (req, res) => {
+  if (!req.user) {
+    const job = await Job.findOne({
+      _id: req.params.jobId,
+      source: 'marketplace',
+      status: 'open',
+      visibility: 'public',
+    }).populate(jobPopulate);
+    if (!job) throw AppError.notFound('Job');
+    return res.json({ job: publicJobView(job.toJSON()), side: 'guest', myOfferStatus: null });
+  }
+
   const { job, side } = await loadJob(req, req.params.jobId, { allowViewer: true });
   await job.populate(jobPopulate);
   const json = job.toJSON();
-  res.json({ job: side === 'viewer' ? publicJobView(json) : json, side });
+
+  const myOffer =
+    side === 'viewer' ? await Offer.findOne({ job: job._id, pro: req.user._id }).select('status').lean() : null;
+
+  res.json({
+    job: side === 'viewer' ? publicJobView(json) : json,
+    side,
+    myOfferStatus: myOffer?.status ?? null,
+  });
 };
 
 // PATCH /jobs/:jobId

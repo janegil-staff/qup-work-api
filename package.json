@@ -5,8 +5,12 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+   "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "seed": "node scripts/seed.js",
+    "test:flow": "node scripts/flow-test.js",
+    "fix": "node scripts/fix-default-company.js",
+    "db:reset": "node scripts/reset-db.js"
   },
   "engines": {
     "node": ">=20.6"

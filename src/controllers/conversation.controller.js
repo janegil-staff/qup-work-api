@@ -15,7 +15,8 @@ async function loadConversation(req, conversationId) {
   return conversation;
 }
 
-async function postMessage(conversation, sender, { text, attachments }) {
+async function postMessage(conversation, sender, { text: rawText, attachments }) {
+  const text = typeof rawText === 'string' ? rawText.trim() : undefined;
   const files = (Array.isArray(attachments) ? attachments : []).map((a) => ({
     ...a,
     uploadedBy: sender._id,
@@ -59,6 +60,16 @@ export const listConversations = async (req, res) => {
   res.json(result);
 };
 
+// GET /conversations/unread → { unread: 5 }  (total over all conversations, for the tab badge)
+export const unreadTotal = async (req, res) => {
+  const uid = req.user._id.toString();
+  const [row] = await Conversation.aggregate([
+    { $match: { participants: req.user._id } },
+    { $group: { _id: null, unread: { $sum: { $ifNull: [`$unreadCounts.${uid}`, 0] } } } },
+  ]);
+  res.json({ unread: row?.unread ?? 0 });
+};
+
 // POST /conversations  { participant, job, text }
 // Returns the existing conversation if there already is one for the same people + job
 export const startConversation = async (req, res) => {
@@ -92,17 +103,24 @@ export const getConversation = async (req, res) => {
     { path: 'job', select: 'title status' },
     { path: 'contract', select: 'title status' },
   ]);
-  res.json({ conversation });
+  const { unreadCounts, ...rest } = conversation.toJSON();
+  res.json({ conversation: { ...rest, unread: conversation.unreadCounts?.get(req.user._id.toString()) ?? 0 } });
 };
 
 // GET /conversations/:conversationId/messages?before=<ISO date>&limit=30
-// Newest first; pass the oldest createdAt you have as "before" to load older messages
+// Newest first. Pass the oldest createdAt you have as "before" to load older messages,
+// or the newest createdAt as "after" to fetch only what has arrived since (polling).
 export const listMessages = async (req, res) => {
   const conversation = await loadConversation(req, req.params.conversationId);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
 
   const filter = { conversation: conversation._id };
-  if (req.query.before) filter.createdAt = { $lt: new Date(req.query.before) };
+  for (const [param, op] of [['before', '$lt'], ['after', '$gt']]) {
+    if (!req.query[param]) continue;
+    const date = new Date(req.query[param]);
+    if (Number.isNaN(date.getTime())) throw new AppError(`${param} must be a valid date`, 400);
+    filter.createdAt = { ...filter.createdAt, [op]: date };
+  }
 
   const messages = await Message.find(filter)
     .sort({ createdAt: -1 })
@@ -116,6 +134,7 @@ export const sendMessage = async (req, res) => {
   const conversation = await loadConversation(req, req.params.conversationId);
   const { text, attachments } = req.body ?? {};
   const message = await postMessage(conversation, req.user, { text, attachments });
+  await message.populate('sender', 'name avatarUrl');
   res.status(201).json({ message });
 };
 

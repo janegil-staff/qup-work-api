@@ -1,7 +1,7 @@
 // /qup-work-api/src/controllers/pro.controller.js
-import { ProProfile, User, Review } from '../models/index.js';
+import { ProProfile, User, Review, Category } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
-import { pick, setNested, getPagination, paginate, geoFilter } from '../utils/http.js';
+import { pick, setNested, getPagination, paginate, geoFilter, escapeRegex } from '../utils/http.js';
 import { assertCompanyRole } from '../utils/access.js';
 
 const PROFILE_FIELDS = [
@@ -57,9 +57,18 @@ export const searchPros = async (req, res) => {
   const { category, q, workType } = req.query;
   const filter = { availableForMarketplace: true };
 
-  if (category) filter.categories = category;
+  if (category) {
+    // the category itself + its subcategories
+    const ids = String(category).split(',').filter(Boolean);
+    const children = await Category.find({ parent: { $in: ids } }).select('_id').lean();
+    filter.categories = { $in: [...ids, ...children.map((c) => c._id)] };
+  }
   if (workType) filter.workType = { $in: [workType, 'both'] };
-  if (q) filter.$text = { $search: String(q) };
+  if (q) {
+    // partial match, so "elektr" finds "Elektriker"
+    const re = { $regex: escapeRegex(String(q)), $options: 'i' };
+    filter.$or = [{ headline: re }, { skills: re }, { bio: re }, { 'serviceArea.municipalities': re }];
+  }
   Object.assign(filter, geoFilter(req.query, 'serviceArea.location') ?? {});
 
   const result = await paginate(ProProfile, filter, getPagination(req.query), {

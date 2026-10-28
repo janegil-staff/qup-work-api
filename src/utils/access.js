@@ -69,7 +69,8 @@ export async function jobSide(req, job) {
 export const isJobOwner = (job, side) =>
   (job.source === 'marketplace' && side === 'customer') || (job.source === 'direct' && side === 'pro');
 
-// allowViewer: pros may look at open marketplace jobs they can bid on → side 'viewer'
+// allowViewer: anyone logged in may look at open public marketplace jobs → side 'viewer'
+// (sending an offer still requires the pro role, see job.routes.js)
 export async function loadJob(req, jobId, { allowViewer = false } = {}) {
   if (!jobId) throw new AppError('job is required', 400);
   const job = await Job.findById(jobId);
@@ -80,7 +81,6 @@ export async function loadJob(req, jobId, { allowViewer = false } = {}) {
     allowViewer &&
     job.source === 'marketplace' &&
     job.status === 'open' &&
-    req.user.roles.includes('pro') &&
     (job.visibility === 'public' || job.invitedPros.some((p) => same(p, req.user._id)));
   if (!side && canView) side = 'viewer';
   if (!side) throw AppError.notFound('Job');

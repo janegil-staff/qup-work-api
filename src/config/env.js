@@ -1,7 +1,5 @@
 // /qup-work-api/src/config/env.js
 // One place to read and validate environment variables.
-// /qup-work-api/src/config/env.js
-// One place to read and validate environment variables.
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +9,7 @@ const envFile = fileURLToPath(new URL('../../.env', import.meta.url));
 if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
 const required = ['MONGO_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
+
 for (const key of required) {
   if (!process.env[key]) {
     throw new Error(`Missing required env variable: ${key} (did you create .env?)`);

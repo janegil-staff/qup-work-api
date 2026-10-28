@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import {
   listConversations, startConversation, getConversation, listMessages, sendMessage,
-  markConversationRead,
+  markConversationRead, unreadTotal,
 } from '../controllers/conversation.controller.js';
 
 const router = Router();
@@ -11,6 +11,7 @@ router.use(requireAuth);
 
 router.get('/', listConversations);
 router.post('/', startConversation);
+router.get('/unread', unreadTotal); // before /:conversationId
 router.get('/:conversationId', getConversation);
 router.get('/:conversationId/messages', listMessages);
 router.post('/:conversationId/messages', sendMessage);
