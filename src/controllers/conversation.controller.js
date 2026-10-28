@@ -4,6 +4,7 @@ import { AppError } from '../utils/AppError.js';
 import { getPagination, paginate } from '../utils/http.js';
 import { idOf, loadJob, same } from '../utils/access.js';
 import { notify } from '../utils/notify.js';
+import { cleanAttachments } from '../utils/uploads.js';
 
 const participantPopulate = { path: 'participants', select: 'name avatarUrl' };
 
@@ -17,10 +18,7 @@ async function loadConversation(req, conversationId) {
 
 async function postMessage(conversation, sender, { text: rawText, attachments }) {
   const text = typeof rawText === 'string' ? rawText.trim() : undefined;
-  const files = (Array.isArray(attachments) ? attachments : []).map((a) => ({
-    ...a,
-    uploadedBy: sender._id,
-  }));
+  const files = cleanAttachments(attachments, sender._id);
   const message = await Message.create({
     conversation: conversation._id,
     sender: sender._id,

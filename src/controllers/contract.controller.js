@@ -1,5 +1,5 @@
 // /qup-work-api/src/controllers/contract.controller.js
-import { Contract, Job, Milestone, Company, ProProfile, Payment, TimeEntry } from '../models/index.js';
+import { Contract, Job, Milestone, Company, ProProfile, Payment, Review, TimeEntry } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
 import { pick, getPagination, paginate } from '../utils/http.js';
 import {
@@ -97,11 +97,11 @@ export const listMyContracts = async (req, res) => {
   );
 };
 
-// GET /contracts/:contractId → contract + milestones + hours summary
+// GET /contracts/:contractId → contract + milestones + hours summary + my review (if any)
 export const getContract = async (req, res) => {
   const { contract, side } = await loadContract(req, req.params.contractId);
 
-  const [milestones, [hours]] = await Promise.all([
+  const [milestones, [hours], myReview] = await Promise.all([
     Milestone.find({ contract: contract._id }).sort({ order: 1 }),
     TimeEntry.aggregate([
       { $match: { contract: contract._id, running: false } },
@@ -113,6 +113,7 @@ export const getContract = async (req, res) => {
         },
       },
     ]),
+    Review.findOne({ contract: contract._id, reviewer: req.user._id }).select('rating comment createdAt'),
   ]);
 
   await contract.populate(contractPopulate);
@@ -121,6 +122,7 @@ export const getContract = async (req, res) => {
     side,
     milestones,
     hours: { minutes: hours?.minutes ?? 0, billableMinutes: hours?.billableMinutes ?? 0 },
+    myReview,
   });
 };
 

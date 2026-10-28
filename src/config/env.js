@@ -33,4 +33,17 @@ export const env = {
 
   // Our cut on marketplace jobs paid through the app (percent)
   platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? 8),
+
+  // Photo uploads. The app uploads straight to Cloudinary with a signature from
+  // POST /uploads/signature, so the secret never leaves the server. Optional:
+  // without these, uploads answer 503 and everything else works as before.
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
+    apiKey: process.env.CLOUDINARY_API_KEY ?? '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
+    folder: (process.env.CLOUDINARY_FOLDER ?? 'qup-work').replace(/^\/+|\/+$/g, ''),
+  },
 };
+
+export const cloudinaryReady = () =>
+  Boolean(env.cloudinary.cloudName && env.cloudinary.apiKey && env.cloudinary.apiSecret);

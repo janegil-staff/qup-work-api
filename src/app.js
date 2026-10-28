@@ -21,7 +21,12 @@ export function createApp() {
     })
   );
   app.use(express.json({ limit: '1mb' }));
-  app.use(morgan(env.isProd ? 'combined' : 'dev'));
+  // The app polls these every few seconds while a chat is open; don't fill the log with them
+  const isPoll = (req, res) =>
+    req.method === 'GET' &&
+    res.statusCode < 400 &&
+    /\/conversations\/(unread|[a-f0-9]{24}\/messages\?limit=\d+)$/.test(req.originalUrl);
+  app.use(morgan(env.isProd ? 'combined' : 'dev', { skip: env.isProd ? undefined : isPoll }));
 
   app.use('/api/v1', routes);
 

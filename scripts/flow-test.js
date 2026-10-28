@@ -13,6 +13,13 @@ const envFile = fileURLToPath(new URL('../.env', import.meta.url));
 if (fs.existsSync(envFile)) process.loadEnvFile(envFile);
 
 const BASE = process.env.API_URL ?? `http://localhost:${process.env.PORT ?? 4000}/api/v1`;
+// Attachments must come from our own Cloudinary when it's set up (see src/utils/uploads.js)
+const CLOUD = process.env.CLOUDINARY_CLOUD_NAME;
+const photoUrl = (name) =>
+  CLOUD ? `https://res.cloudinary.com/${CLOUD}/image/upload/flow-test/${name}` : `https://example.com/${name}`;
+// The smallest possible PNG (1×1 pixel), for a real test upload
+const TINY_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const RUN = Date.now().toString(36);
 
 // ---------------------------------------------------------------------------
@@ -158,6 +165,40 @@ async function main() {
   });
   if (sectionFailed) return; // nothing else can work without setup
 
+  // ---------------------------------------------------------------- Uploads
+  section('📷 Photo uploads (Cloudinary)');
+  await step('server hands out an upload signature (or says uploads are off)', async () => {
+    const res = await api(user('pro').token, 'POST', '/uploads/signature', { purpose: 'milestone' });
+    if (res.status === 503) {
+      S.uploadsOff = true;
+      console.log('       ℹ️  CLOUDINARY_* is not set in .env, so photo uploads are off');
+      return;
+    }
+    const data = expectStatus(res, 200);
+    check(data.signature && data.timestamp && data.apiKey && data.cloudName, 'signature fields missing');
+    check(data.folder.endsWith(`/milestone/${user('pro').id}`), `folder is ${data.folder}`);
+    S.sig = data;
+  });
+  await step('a test photo uploads to Cloudinary with that signature', async () => {
+    if (S.uploadsOff) return;
+    const form = new FormData();
+    form.append('file', TINY_PNG);
+    form.append('api_key', S.sig.apiKey);
+    form.append('timestamp', String(S.sig.timestamp));
+    form.append('folder', S.sig.folder);
+    form.append('signature', S.sig.signature);
+    const res = await fetch(S.sig.uploadUrl, { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    check(res.ok, `Cloudinary said ${res.status}: ${data.error?.message ?? 'no details'} (check the CLOUDINARY_* values in .env)`);
+    check(data.secure_url?.startsWith(`https://res.cloudinary.com/${S.sig.cloudName}/`), 'unexpected URL from Cloudinary');
+    S.uploadedUrl = data.secure_url;
+    S.uploadedKey = data.public_id;
+  });
+  await step('an unknown upload purpose is refused (400)', async () => {
+    if (S.uploadsOff) return;
+    expectStatus(await api(user('pro').token, 'POST', '/uploads/signature', { purpose: 'anything' }), 400);
+  });
+
   // ---------------------------------------------------------------- Direct flow
   section('🔧 Direct flow: pro works for their own client, hourly');
   await step('create client → gets the company automatically', async () => {
@@ -240,11 +281,21 @@ async function main() {
     expectStatus(await api(user('pro').token, 'POST', `${base}/start`), 200);
     const data = expectStatus(
       await api(user('pro').token, 'POST', `${base}/attachments`, {
-        attachments: [{ url: 'https://example.com/before.jpg', tag: 'before' }],
+        attachments: [{ url: S.uploadedUrl ?? photoUrl('before.jpg'), key: S.uploadedKey, tag: 'before' }],
       }),
       201
     );
     check(data.milestone.attachments.length === 1, 'attachment missing');
+  });
+  await step('attachments from other websites are refused (400)', async () => {
+    if (S.uploadsOff) return; // without Cloudinary any https URL is allowed
+    const base = `/contracts/${S.directContract}/milestones/${S.directMilestone}`;
+    expectStatus(
+      await api(user('pro').token, 'POST', `${base}/attachments`, {
+        attachments: [{ url: 'https://evil.example.com/x.jpg', tag: 'before' }],
+      }),
+      400
+    );
   });
   await step('client signs on the pro\'s phone → milestone approved', async () => {
     const data = expectStatus(
@@ -456,7 +507,7 @@ async function main() {
     const data = expectStatus(
       await api(user('pro').token, 'POST', `${ms(S.m1)}/submit`, {
         submissionNote: 'Rørene er lagt.',
-        attachments: [{ url: 'https://example.com/after.jpg', tag: 'after' }],
+        attachments: [{ url: photoUrl('after.jpg'), tag: 'after' }],
       }),
       200
     );
@@ -526,6 +577,10 @@ async function main() {
       await api(user('customer').token, 'POST', '/reviews', { contract: S.marketContract, rating: 1 }),
       409
     );
+  });
+  await step('the contract shows the customer\'s own review', async () => {
+    const data = expectStatus(await api(user('customer').token, 'GET', `/contracts/${S.marketContract}`), 200);
+    check(data.myReview?.rating === 5, `myReview is ${JSON.stringify(data.myReview)}`);
   });
 
   // ---------------------------------------------------------------- Chat

@@ -7,6 +7,7 @@ import { AppError } from '../utils/AppError.js';
 import { pick } from '../utils/http.js';
 import { loadContract, requireActiveContract } from '../utils/access.js';
 import { notify } from '../utils/notify.js';
+import { cleanAttachments } from '../utils/uploads.js';
 
 const MILESTONE_FIELDS = ['title', 'description', 'amount', 'dueDate'];
 
@@ -27,8 +28,8 @@ const requireStatus = (milestone, allowed) => {
   }
 };
 
-const withUploader = (attachments, uid) =>
-  (Array.isArray(attachments) ? attachments : []).map((a) => ({ ...a, uploadedBy: uid }));
+// Only photos uploaded through the app (see utils/uploads.js)
+const withUploader = (attachments, uid) => cleanAttachments(attachments, uid);
 
 const markJobInProgress = (jobId) =>
   Job.updateOne({ _id: jobId, status: 'assigned' }, { status: 'in_progress' });
