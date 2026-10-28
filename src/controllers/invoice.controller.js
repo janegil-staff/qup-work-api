@@ -86,11 +86,13 @@ const requireDraft = (invoice) => {
   if (invoice.status !== 'draft') throw new AppError('Only draft invoices can be changed', 409);
 };
 
-// GET /invoices?role=company|customer&company=&client=&status=
+// GET /invoices?role=company|customer&company=&client=&contract=&status=
+//   status=overdue → sent invoices past their due date (the status itself stays "sent")
 export const listInvoices = async (req, res) => {
   let filter;
-  if (req.query.role === 'customer') {
-    filter = { customer: req.user._id, status: { $ne: 'draft' } };
+  const isCustomer = req.query.role === 'customer';
+  if (isCustomer) {
+    filter = { customer: req.user._id };
   } else {
     let ids = await getMyCompanyIds(req, ['owner', 'admin']);
     if (req.query.company) {
@@ -100,13 +102,28 @@ export const listInvoices = async (req, res) => {
     filter = { company: { $in: ids } };
     if (req.query.client) filter.client = req.query.client;
   }
-  if (req.query.status) filter.status = { $in: String(req.query.status).split(',') };
+  if (req.query.contract) filter.contract = req.query.contract;
+  if (req.query.status) {
+    const statuses = String(req.query.status).split(',');
+    if (statuses.includes('overdue')) {
+      const others = statuses.filter((s) => s !== 'overdue');
+      const late = { status: { $in: ['sent', 'overdue'] }, dueDate: { $lt: new Date() } };
+      filter.$or = [late, ...(others.length ? [{ status: { $in: others } }] : [])];
+    } else {
+      filter.status = { $in: statuses };
+    }
+  }
+
+  // Customers never see drafts, whatever status they ask for
+  if (isCustomer) filter.$and = [{ status: { $ne: 'draft' } }];
 
   res.json(
     await paginate(Invoice, filter, getPagination(req.query), {
+      sort: { updatedAt: -1 },
       populate: [
         { path: 'client', select: 'name' },
         { path: 'company', select: 'name' },
+        { path: 'contract', select: 'title' },
       ],
     })
   );

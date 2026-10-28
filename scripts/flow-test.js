@@ -612,6 +612,47 @@ async function main() {
     check(data.myReview?.rating === 5, `myReview is ${JSON.stringify(data.myReview)}`);
   });
 
+  // ---------------------------------------------------------------- Invoice to an app customer
+  section('🧾 Invoice to a customer with an account');
+  await step('pro drafts an invoice on the marketplace contract', async () => {
+    const data = expectStatus(
+      await api(user('pro').token, 'POST', '/invoices', {
+        company: S.company,
+        contract: S.marketContract,
+        lines: [{ description: 'Nytt bad', quantity: 1, unit: 'stk', unitPrice: 640000, vatRate: 25 }],
+      }),
+      201
+    );
+    S.marketInvoice = data.invoice._id;
+    check(data.invoice.total === 800000, `total is ${data.invoice.total}`);
+    check(idOf(data.invoice.customer) === user('customer').id, 'customer not set from the contract');
+  });
+  await step('the customer can\'t see the draft, not even with ?status=draft', async () => {
+    const data = expectStatus(
+      await api(user('customer').token, 'GET', '/invoices?role=customer&status=draft'),
+      200
+    );
+    check(!data.data.some((i) => i._id === S.marketInvoice), 'a draft was shown to the customer');
+    expectStatus(await api(user('customer').token, 'GET', `/invoices/${S.marketInvoice}`), [403, 404]);
+  });
+  await step('pro sends it → the customer sees it on the contract', async () => {
+    const sent = expectStatus(await api(user('pro').token, 'POST', `/invoices/${S.marketInvoice}/send`), 200);
+    check(sent.invoice.number && sent.invoice.kid, 'number/KID missing');
+    const data = expectStatus(
+      await api(user('customer').token, 'GET', `/invoices?role=customer&contract=${S.marketContract}`),
+      200
+    );
+    check(data.data.length === 1 && data.data[0].status === 'sent', 'invoice not listed for the customer');
+  });
+  await step('the pro\'s list can be filtered by contract', async () => {
+    const data = expectStatus(await api(user('pro').token, 'GET', `/invoices?contract=${S.directContract}`), 200);
+    check(data.data.length === 1 && data.data[0]._id === S.invoice, 'contract filter not working');
+  });
+  await step('?status=overdue finds nothing that isn\'t late yet', async () => {
+    const data = expectStatus(await api(user('pro').token, 'GET', '/invoices?status=overdue'), 200);
+    check(!data.data.some((i) => i._id === S.marketInvoice), 'a new invoice counted as overdue');
+  });
+
   // ---------------------------------------------------------------- Chat
   section('💬 Chat');
   await step('customer starts a conversation about the job', async () => {
