@@ -396,6 +396,34 @@ async function main() {
       409
     );
   });
+  await step('the job tells the pro which offer is theirs', async () => {
+    const data = expectStatus(await api(user('pro').token, 'GET', `/jobs/${S.marketJob}`), 200);
+    check(data.myOffer?._id === S.offer && data.myOffer.status === 'pending', 'myOffer missing');
+  });
+  await step('pro withdraws the offer and sends a new one', async () => {
+    const w = expectStatus(await api(user('pro').token, 'POST', `/offers/${S.offer}/withdraw`), 200);
+    check(w.offer.status === 'withdrawn', `status is ${w.offer.status}`);
+    const data = expectStatus(
+      await api(user('pro').token, 'POST', `/jobs/${S.marketJob}/offers`, {
+        priceType: 'fixed',
+        amount: 800000,
+        message: 'Kan starte neste uke.',
+        proposedMilestones: [
+          { title: 'Rørlegging', amount: 500000 },
+          { title: 'Flislegging', amount: 300000 },
+        ],
+      }),
+      201
+    );
+    check(data.offer.status === 'pending', 'new offer is not pending');
+    S.offer = data.offer._id;
+  });
+  await step('/offers/mine lists the offer with the job and its category', async () => {
+    const data = expectStatus(await api(user('pro').token, 'GET', '/offers/mine?status=pending'), 200);
+    const mine = data.data.find((o) => o._id === S.offer);
+    check(mine?.job?.title === 'Nytt bad, ca. 6 m²', 'job missing on my offer');
+    check(!S.category || mine.job.category?.slug, 'category not populated');
+  });
   await step('customer sees the offer with the pro\'s profile', async () => {
     const data = expectStatus(await api(user('customer').token, 'GET', `/jobs/${S.marketJob}/offers`), 200);
     check(data.offers.length === 1, `${data.offers.length} offers`);

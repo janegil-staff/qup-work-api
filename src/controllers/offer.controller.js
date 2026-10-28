@@ -41,10 +41,17 @@ export const createOffer = async (req, res) => {
     throw new AppError('This job is no longer accepting offers', 409);
   }
 
+  // One offer per pro per job. A withdrawn offer can be replaced by a new one.
+  const existing = await Offer.findOne({ job: job._id, pro: req.user._id }).select('status');
+  if (existing && existing.status !== 'withdrawn') {
+    throw new AppError('You have already sent an offer on this job', 409);
+  }
+
   const company =
     req.body?.company ?? (isDirectQuote ? job.company : undefined) ?? (await defaultCompanyId(req));
   if (company) await assertCompanyRole(req, company);
 
+  if (existing) await existing.deleteOne();
   const offer = await Offer.create({
     ...pick(req.body, OFFER_FIELDS),
     job: job._id,
@@ -93,7 +100,12 @@ export const listMyOffers = async (req, res) => {
 
   res.json(
     await paginate(Offer, filter, getPagination(req.query), {
-      populate: { path: 'job', select: 'title status source address.city category publishedAt' },
+      sort: { updatedAt: -1 },
+      populate: {
+        path: 'job',
+        select: 'title status source address.city workType category publishedAt',
+        populate: { path: 'category', select: 'name slug icon' },
+      },
     })
   );
 };

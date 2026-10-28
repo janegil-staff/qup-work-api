@@ -163,7 +163,7 @@ export const getJob = async (req, res) => {
       visibility: 'public',
     }).populate(jobPopulate);
     if (!job) throw AppError.notFound('Job');
-    return res.json({ job: publicJobView(job.toJSON()), side: 'guest', myOfferStatus: null });
+    return res.json({ job: publicJobView(job.toJSON()), side: 'guest', myOfferStatus: null, myOffer: null });
   }
 
   const { job, side } = await loadJob(req, req.params.jobId, { allowViewer: true });
@@ -177,6 +177,7 @@ export const getJob = async (req, res) => {
     job: side === 'viewer' ? publicJobView(json) : json,
     side,
     myOfferStatus: myOffer?.status ?? null,
+    myOffer: myOffer ? { _id: myOffer._id, status: myOffer.status } : null,
   });
 };
 
