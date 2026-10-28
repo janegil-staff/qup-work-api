@@ -167,6 +167,8 @@ export const completeContract = async (req, res) => {
   if (side === 'customer') {
     await notify(contract.pro, 'contract_completed', 'Oppdraget er fullført ✅', contract.title, {
       contractId: contract._id,
+      jobTitle: contract.title,
+      actorName: req.user.name,
     });
   }
   res.json({ contract });
@@ -194,6 +196,8 @@ export const cancelContract = async (req, res) => {
   const other = side === 'customer' ? contract.pro : contract.customer;
   await notify(other, 'contract_cancelled', 'Oppdraget ble avbrutt', contract.title, {
     contractId: contract._id,
+    jobTitle: contract.title,
+    actorName: req.user.name,
   });
   res.json({ contract });
 };

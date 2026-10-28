@@ -1,5 +1,5 @@
 // /qup-work-api/src/controllers/conversation.controller.js
-import { Conversation, Message, User } from '../models/index.js';
+import { Conversation, Message, Notification, User } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
 import { getPagination, paginate } from '../utils/http.js';
 import { idOf, loadJob, same } from '../utils/access.js';
@@ -38,6 +38,8 @@ async function postMessage(conversation, sender, { text: rawText, attachments })
   for (const p of others) {
     await notify(idOf(p), 'new_message', sender.name, text ? text.slice(0, 120) : 'Sendte et vedlegg', {
       conversationId: conversation._id,
+      actorName: sender.name,
+      preview: text ? text.slice(0, 120) : null,
     });
   }
   return message;
@@ -145,6 +147,11 @@ export const markConversationRead = async (req, res) => {
   await Message.updateMany(
     { conversation: conversation._id, sender: { $ne: uid }, 'readBy.user': { $ne: uid } },
     { $push: { readBy: { user: uid, readAt: new Date() } } }
+  );
+  // Reading the chat also clears its "new message" notifications
+  await Notification.updateMany(
+    { user: uid, type: 'new_message', 'data.conversationId': conversation._id, readAt: null },
+    { $set: { readAt: new Date() } }
   );
   res.status(204).end();
 };

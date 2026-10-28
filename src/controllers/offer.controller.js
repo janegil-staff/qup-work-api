@@ -63,6 +63,8 @@ export const createOffer = async (req, res) => {
   await notify(job.customer, 'new_offer', 'Nytt tilbud', `${req.user.name} har sendt et tilbud på «${job.title}»`, {
     jobId: job._id,
     offerId: offer._id,
+    jobTitle: job.title,
+    actorName: req.user.name,
   });
   res.status(201).json({ offer });
 };
@@ -222,10 +224,16 @@ export const acceptOffer = async (req, res) => {
     await notify(offer.pro, 'offer_accepted', 'Tilbudet ditt er akseptert! 🎉', `«${job.title}»`, {
       jobId: job._id,
       contractId: contract._id,
+      jobTitle: job.title,
+      actorName: req.user.name,
     });
   }
   for (const o of others) {
-    await notify(o.pro, 'offer_rejected', 'Oppdraget gikk til en annen', `«${job.title}»`, { jobId: job._id });
+    await notify(o.pro, 'offer_rejected', 'Oppdraget gikk til en annen', `«${job.title}»`, {
+      jobId: job._id,
+      jobTitle: job.title,
+      reason: 'other_chosen',
+    });
   }
 
   res.status(201).json({ contract, offer });
@@ -241,6 +249,10 @@ export const rejectOffer = async (req, res) => {
   offer.respondedAt = new Date();
   await offer.save();
 
-  await notify(offer.pro, 'offer_rejected', 'Tilbudet ble avslått', `«${job.title}»`, { jobId: job._id });
+  await notify(offer.pro, 'offer_rejected', 'Tilbudet ble avslått', `«${job.title}»`, {
+    jobId: job._id,
+    jobTitle: job.title,
+    reason: 'declined',
+  });
   res.json({ offer });
 };

@@ -1,6 +1,11 @@
 // /qup-work-api/src/utils/notify.js
 // Creates an in-app notification. Expo push sending gets added here in a later step,
 // so every controller that calls notify() automatically gets push too.
+//
+// title/body are a Norwegian fallback. The app writes its own text in the user's
+// language from `type` + `data`, so put what it needs in data:
+//   jobTitle, stepTitle, actorName (who did it), plus ids to open the right screen
+//   (jobId, contractId, conversationId, ...)
 import { Notification } from '../models/index.js';
 
 export async function notify(userId, type, title, body, data = {}) {

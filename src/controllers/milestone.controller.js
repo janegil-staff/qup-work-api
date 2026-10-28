@@ -124,6 +124,9 @@ export const submitMilestone = async (req, res) => {
   await notify(contract.customer, 'milestone_submitted', 'Arbeid levert til godkjenning', milestone.title, {
     contractId: contract._id,
     milestoneId: milestone._id,
+    jobTitle: contract.title,
+    stepTitle: milestone.title,
+    actorName: req.user.name,
   });
   res.json({ milestone });
 };
@@ -157,6 +160,9 @@ export const approveMilestone = async (req, res) => {
     await notify(contract.pro, 'milestone_approved', 'Arbeid godkjent ✅', milestone.title, {
       contractId: contract._id,
       milestoneId: milestone._id,
+      jobTitle: contract.title,
+      stepTitle: milestone.title,
+      actorName: req.user.name,
     });
   }
   res.json({ milestone });
@@ -176,6 +182,9 @@ export const requestChanges = async (req, res) => {
   await notify(contract.pro, 'changes_requested', 'Kunden ønsker endringer', milestone.title, {
     contractId: contract._id,
     milestoneId: milestone._id,
+    jobTitle: contract.title,
+    stepTitle: milestone.title,
+    actorName: req.user.name,
   });
   res.json({ milestone });
 };

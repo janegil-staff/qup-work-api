@@ -694,6 +694,23 @@ async function main() {
     check(c.count > 0, 'customer has no notifications');
     check(p.count > 0, 'pro has no notifications');
   });
+  await step('a new offer notification says which job and who sent it', async () => {
+    const data = expectStatus(await api(user('customer').token, 'GET', '/notifications?type=new_offer'), 200);
+    const n = data.data[0];
+    check(n?.data?.jobTitle === 'Nytt bad, ca. 6 m²', `jobTitle is ${n?.data?.jobTitle}`);
+    check(n.data.actorName === 'Test Pro', `actorName is ${n.data.actorName}`);
+  });
+  await step('the bell can leave chat messages out', async () => {
+    const all = expectStatus(await api(user('customer').token, 'GET', '/notifications?type=new_message'), 200);
+    check(all.data.length > 0, 'customer has no message notifications');
+    const bell = expectStatus(await api(user('customer').token, 'GET', '/notifications?exclude=new_message&limit=100'), 200);
+    check(!bell.data.some((n) => n.type === 'new_message'), 'messages are still in the list');
+  });
+  await step('reading a chat clears its message notifications', async () => {
+    expectStatus(await api(user('customer').token, 'POST', `/conversations/${S.conversation}/read`), 204);
+    const data = expectStatus(await api(user('customer').token, 'GET', '/notifications/unread-count?type=new_message'), 200);
+    check(data.count === 0, `${data.count} unread message notifications`);
+  });
   await step('mark all read → 0 unread', async () => {
     expectStatus(await api(user('pro').token, 'POST', '/notifications/read-all'), 200);
     const data = expectStatus(await api(user('pro').token, 'GET', '/notifications/unread-count'), 200);

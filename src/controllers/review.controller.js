@@ -36,6 +36,11 @@ export const createReview = async (req, res) => {
 
   await notify(reviewee, 'new_review', `Ny vurdering: ${'⭐'.repeat(review.rating)}`, contract.title, {
     reviewId: review._id,
+    contractId: contract._id,
+    jobTitle: contract.title,
+    actorName: req.user.name,
+    rating: review.rating,
+    direction,
   });
   res.status(201).json({ review });
 };

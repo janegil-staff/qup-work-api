@@ -227,7 +227,7 @@ export const sendInvoice = async (req, res) => {
   const company = await Company.findOneAndUpdate(
     { _id: invoice.company },
     { $inc: { 'invoiceSettings.nextInvoiceNumber': 1 } },
-    { new: false, projection: { invoiceSettings: 1 } }
+    { new: false, projection: { invoiceSettings: 1, name: 1 } }
   );
   const number = company.invoiceSettings?.nextInvoiceNumber ?? 1;
 
@@ -237,6 +237,9 @@ export const sendInvoice = async (req, res) => {
 
   await notify(invoice.customer, 'invoice_received', `Ny faktura #${number}`, invoice.billTo.name, {
     invoiceId: invoice._id,
+    contractId: invoice.contract,
+    invoiceNumber: number,
+    actorName: company.name,
   });
   res.json({ invoice });
 };
