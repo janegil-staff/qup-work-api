@@ -6,6 +6,9 @@ import { AppError } from '../utils/AppError.js';
 import { pick, getPagination, paginate, addDays } from '../utils/http.js';
 import { assertCompanyRole, getMyCompanyIds, loadContract, same } from '../utils/access.js';
 import { notify } from '../utils/notify.js';
+import { emailInvoice } from '../utils/invoiceEmail.js';
+import { buildInvoicePdf, invoiceFileName, invoiceLang } from '../utils/invoicePdf.js';
+import { signFileToken, verifyFileToken } from '../utils/tokens.js';
 
 const LINE_FIELDS = ['description', 'quantity', 'unit', 'unitPrice', 'vatRate'];
 
@@ -236,7 +239,8 @@ export const updateInvoice = async (req, res) => {
   res.json({ invoice });
 };
 
-// POST /invoices/:invoiceId/send → assigns number + KID
+// POST /invoices/:invoiceId/send  { lang } → assigns number + KID, then emails the PDF to billTo.email
+// Answers { invoice, email: { sent, to, saved?, error? } } so the app can say where it went.
 export const sendInvoice = async (req, res) => {
   const { invoice } = await loadInvoice(req, req.params.invoiceId, { write: true });
   requireDraft(invoice);
@@ -250,7 +254,9 @@ export const sendInvoice = async (req, res) => {
 
   invoice.set({ number, kid: kidFor(number), status: 'sent', sentAt: new Date() });
   await invoice.save();
-  // TODO (email step): generate PDF and email it to billTo.email
+
+  const fullCompany = await Company.findById(invoice.company);
+  const email = await emailInvoice(invoice, fullCompany, { lang: invoiceLang(req.body?.lang) });
 
   await notify(invoice.customer, 'invoice_received', `Ny faktura #${number}`, invoice.billTo.name, {
     invoiceId: invoice._id,
@@ -258,7 +264,45 @@ export const sendInvoice = async (req, res) => {
     invoiceNumber: number,
     actorName: company.name,
   });
-  res.json({ invoice });
+  res.json({ invoice, email });
+};
+
+// POST /invoices/:invoiceId/email  { to, lang } → send the PDF (again), e.g. to a new address
+export const resendInvoiceEmail = async (req, res) => {
+  const { invoice } = await loadInvoice(req, req.params.invoiceId, { write: true });
+  if (invoice.status === 'draft') throw new AppError('Send the invoice first, drafts are not emailed', 409);
+  const company = await Company.findById(invoice.company);
+  const email = await emailInvoice(invoice, company, { to: req.body?.to, lang: invoiceLang(req.body?.lang) });
+  if (email.error === 'no_email') throw new AppError('A valid email address is needed', 400);
+  res.json({ invoice, email });
+};
+
+// POST /invoices/:invoiceId/pdf-link  { lang } → { path } valid for 10 minutes.
+// The app opens API_URL + path in the browser, which can't send our login header,
+// so the link itself carries a short-lived token for this one invoice.
+export const getPdfLink = async (req, res) => {
+  const { invoice } = await loadInvoice(req, req.params.invoiceId);
+  const token = signFileToken({ kind: 'invoice-pdf', id: String(invoice._id), uid: String(req.user._id) });
+  const lang = invoiceLang(req.body?.lang);
+  res.json({ path: `/invoices/${invoice._id}/pdf?token=${encodeURIComponent(token)}&lang=${lang}` });
+};
+
+// GET /invoices/:invoiceId/pdf?token=  (no login header, the token from pdf-link is the proof)
+export const getInvoicePdf = async (req, res) => {
+  const claims = verifyFileToken(String(req.query.token ?? ''), 'invoice-pdf');
+  if (!claims || claims.id !== req.params.invoiceId) throw AppError.unauthorized('This link has expired, open the invoice again');
+  const invoice = await Invoice.findById(req.params.invoiceId);
+  if (!invoice) throw AppError.notFound('Invoice');
+  const company = await Company.findById(invoice.company);
+
+  const lang = invoiceLang(req.query.lang);
+  const pdf = await buildInvoicePdf(invoice, company, { lang });
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `inline; filename="${invoiceFileName(invoice, lang)}"`,
+    'Cache-Control': 'private, no-store',
+  });
+  res.send(Buffer.from(pdf));
 };
 
 // POST /invoices/:invoiceId/mark-paid  { paidAt }

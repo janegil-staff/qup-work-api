@@ -43,7 +43,15 @@ export const env = {
     apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
     folder: (process.env.CLOUDINARY_FOLDER ?? 'qup-work').replace(/^\/+|\/+$/g, ''),
   },
+
+  // Email (invoices). Optional: without a key, emails are saved to tmp/mail/ instead of sent.
+  mail: {
+    resendApiKey: process.env.RESEND_API_KEY ?? '',
+    from: process.env.MAIL_FROM ?? 'Qup Work <onboarding@resend.dev>',
+  },
 };
 
 export const cloudinaryReady = () =>
   Boolean(env.cloudinary.cloudName && env.cloudinary.apiKey && env.cloudinary.apiSecret);
+
+export const mailReady = () => Boolean(env.mail.resendApiKey);

@@ -16,6 +16,20 @@ export const signRefreshToken = (user) =>
 export const verifyAccessToken = (token) => jwt.verify(token, env.jwtAccessSecret);
 export const verifyRefreshToken = (token) => jwt.verify(token, env.jwtRefreshSecret);
 
+// Its own secret, so a file link can never pass as a login token
+const fileSecret = () => `${env.jwtAccessSecret}:files`;
+
+// Short-lived token for opening one file in a browser (e.g. an invoice PDF)
+export const signFileToken = (claims) => jwt.sign({ ...claims, purpose: 'file' }, fileSecret(), { expiresIn: '10m' });
+export function verifyFileToken(token, kind) {
+  try {
+    const claims = jwt.verify(token, fileSecret());
+    return claims.purpose === 'file' && claims.kind === kind ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
 export const issueTokens = (user) => ({
   accessToken: signAccessToken(user),
   refreshToken: signRefreshToken(user),

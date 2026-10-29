@@ -3,3 +3,6 @@ node_modules/
 .env
 .DS_Store
 npm-debug.log*
+
+# emails saved locally when RESEND_API_KEY is missing
+tmp/

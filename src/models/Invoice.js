@@ -61,6 +61,11 @@ const invoiceSchema = new Schema(
     paidAt: Date,
     notes: { type: String, maxlength: 2000 },
     pdfUrl: String,
+
+    // The PDF emailed to billTo.email (see utils/invoiceEmail.js)
+    emailedAt: Date,
+    emailedTo: String,
+    emailError: String,
   },
   { timestamps: true }
 );
