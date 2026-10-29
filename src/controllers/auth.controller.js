@@ -51,8 +51,9 @@ export const refresh = async (req, res) => {
 };
 
 // POST /auth/logout → logs out ALL devices
+// Push tokens go too, so a logged-out phone doesn't keep getting notifications
 export const logout = async (req, res) => {
-  await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
+  await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 }, $set: { pushTokens: [] } });
   res.status(204).end();
 };
 
@@ -108,17 +109,25 @@ export const changePassword = async (req, res) => {
   res.json(issueTokens(user)); // this device stays logged in
 };
 
-// POST /auth/me/push-tokens  { token, platform }
+// POST /auth/me/push-tokens  { token, platform, locale }
+// Called after login and when the language changes (same token → replaced, not duplicated)
 export const addPushToken = async (req, res) => {
-  const { token, platform } = req.body ?? {};
-  if (!token) throw new AppError('token is required', 400);
+  const { token, platform, locale } = req.body ?? {};
+  if (!token || typeof token !== 'string') throw new AppError('token is required', 400);
+  if (!/^Expo(nent)?PushToken\[.+\]$/.test(token)) throw new AppError('token must be an Expo push token', 400);
+  if (platform !== undefined && !['ios', 'android', 'web'].includes(platform)) {
+    throw new AppError('platform must be ios, android or web', 400);
+  }
 
   await User.updateOne({ _id: req.user._id }, { $pull: { pushTokens: { token } } });
   await User.updateOne(
     { _id: req.user._id },
     {
       $push: {
-        pushTokens: { $each: [{ token, platform, createdAt: new Date() }], $slice: -10 },
+        pushTokens: {
+          $each: [{ token, platform, locale: typeof locale === 'string' ? locale.slice(0, 10) : undefined, createdAt: new Date() }],
+          $slice: -10,
+        },
       },
     }
   );

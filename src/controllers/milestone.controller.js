@@ -7,7 +7,7 @@ import { AppError } from '../utils/AppError.js';
 import { pick } from '../utils/http.js';
 import { loadContract, requireActiveContract } from '../utils/access.js';
 import { notify } from '../utils/notify.js';
-import { cleanAttachments } from '../utils/uploads.js';
+import { cleanAttachments, cleanImageUrl } from '../utils/uploads.js';
 
 const MILESTONE_FIELDS = ['title', 'description', 'amount', 'dueDate'];
 
@@ -30,6 +30,18 @@ const requireStatus = (milestone, allowed) => {
 
 // Only photos uploaded through the app (see utils/uploads.js)
 const withUploader = (attachments, uid) => cleanAttachments(attachments, uid);
+
+// { name, imageUrl, location } drawn on the pro's phone. The image must be one we uploaded.
+function cleanSignature(input) {
+  if (!input) return null;
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  if (name.length < 2) throw new AppError('signature.name is required', 400);
+  const imageUrl = cleanImageUrl(input.imageUrl, 'signature.imageUrl');
+  if (!imageUrl) throw new AppError('signature.imageUrl is required', 400);
+  const signature = { name: name.slice(0, 100), imageUrl, signedAt: new Date() };
+  if (input.location?.coordinates) signature.location = input.location;
+  return signature;
+}
 
 const markJobInProgress = (jobId) =>
   Job.updateOne({ _id: jobId, status: 'assigned' }, { status: 'in_progress' });
@@ -138,13 +150,14 @@ export const approveMilestone = async (req, res) => {
   const { contract, side, milestone } = await loadMilestone(req);
   requireActiveContract(contract);
 
-  const signature = req.body?.signature;
   const isCustomer = side === 'customer';
+  const signature = cleanSignature(req.body?.signature);
   const isOnSiteSignature = side === 'pro' && signature;
   if (!isCustomer && !isOnSiteSignature) {
     throw AppError.forbidden('The customer must approve, or sign on site');
   }
-  requireStatus(milestone, isCustomer ? ['submitted'] : ['in_progress', 'submitted']);
+  // On site the customer can sign off a step the pro never formally started
+  requireStatus(milestone, isCustomer ? ['submitted'] : ['pending', 'in_progress', 'submitted', 'changes_requested']);
 
   milestone.set({
     status: 'approved',
@@ -154,6 +167,7 @@ export const approveMilestone = async (req, res) => {
   });
   if (signature) milestone.customerSignature = signature;
   await milestone.save();
+  if (isOnSiteSignature) await markJobInProgress(contract.job);
   // TODO (payments step): release escrow payment for this milestone
 
   if (isCustomer) {

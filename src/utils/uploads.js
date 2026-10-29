@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { env, cloudinaryReady } from '../config/env.js';
 import { AppError } from './AppError.js';
 
-export const UPLOAD_PURPOSES = ['milestone', 'message', 'avatar', 'job'];
+export const UPLOAD_PURPOSES = ['milestone', 'message', 'avatar', 'job', 'signature'];
 
 // Cloudinary's rule: sort the params, join as a=1&b=2, append the secret, SHA-1 it
 export function signParams(params, secret = env.cloudinary.apiSecret) {

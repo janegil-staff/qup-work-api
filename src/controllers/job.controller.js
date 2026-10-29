@@ -7,6 +7,7 @@ import {
 } from '../utils/access.js';
 import { tryLookupPostcode } from '../utils/geo.js';
 import { cleanAttachments } from '../utils/uploads.js';
+import { notify } from '../utils/notify.js';
 
 const JOB_FIELDS = [
   'title', 'description', 'category', 'workType', 'address', 'location', 'images', 'budget', 'timing',
@@ -240,10 +241,20 @@ export const cancelJob = async (req, res) => {
   job.status = 'cancelled';
   job.closedAt = new Date();
   await job.save();
+
+  // Pros waiting for an answer hear that the job is gone
+  const pending = await Offer.find({ job: job._id, status: 'pending' }).select('pro');
   await Offer.updateMany(
-    { job: job._id, status: 'pending' },
+    { _id: { $in: pending.map((o) => o._id) } },
     { status: 'rejected', respondedAt: new Date() }
   );
+  for (const o of pending) {
+    await notify(o.pro, 'offer_rejected', 'Kunden avlyste oppdraget', `«${job.title}»`, {
+      jobId: job._id,
+      jobTitle: job.title,
+      reason: 'job_cancelled',
+    });
+  }
   res.json({ job });
 };
 

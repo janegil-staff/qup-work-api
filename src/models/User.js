@@ -10,6 +10,7 @@ const pushTokenSchema = new Schema(
   {
     token: { type: String, required: true }, // Expo push token
     platform: { type: String, enum: ['ios', 'android', 'web'] },
+    locale: String, // the app language, so the push text matches (e.g. 'nb-NO')
   },
   { _id: false, timestamps: { createdAt: true, updatedAt: false } }
 );
