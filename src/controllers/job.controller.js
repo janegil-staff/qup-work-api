@@ -222,6 +222,8 @@ export const publishJob = async (req, res) => {
   if (job.source !== 'marketplace') throw new AppError('Only marketplace jobs can be published', 400);
   if (!isJobOwner(job, side)) throw AppError.forbidden();
   if (job.status !== 'draft') throw new AppError('Only draft jobs can be published', 409);
+  // Without a category no pro gets told about the job, and it's hard to find
+  if (!job.category) throw new AppError('Choose a category before publishing', 400, { category: 'required' });
 
   job.status = 'open';
   job.publishedAt = new Date();

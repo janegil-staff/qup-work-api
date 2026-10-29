@@ -44,6 +44,12 @@ const userSchema = new Schema(
     pushTokens: { type: [pushTokenSchema], default: [] },
 
     tokenVersion: { type: Number, default: 0, select: false }, // bump = log out all devices
+    // Forgot password: a 6-digit code emailed to the user, stored hashed (see auth.controller.js)
+    passwordReset: {
+      type: new Schema({ codeHash: String, expiresAt: Date, attempts: { type: Number, default: 0 } }, { _id: false }),
+      select: false,
+    },
+    deletedAt: Date,
     status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
     lastLoginAt: Date,
   },
@@ -70,6 +76,7 @@ userSchema.set('toJSON', {
   transform: (doc, ret) => {
     delete ret.password;
     delete ret.tokenVersion;
+    delete ret.passwordReset;
     delete ret.pushTokens;
     delete ret.__v;
     return ret;
