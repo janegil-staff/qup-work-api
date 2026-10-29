@@ -3,6 +3,7 @@ import { ProProfile, User, Review, Category } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
 import { pick, setNested, getPagination, paginate, geoFilter, escapeRegex } from '../utils/http.js';
 import { assertCompanyRole } from '../utils/access.js';
+import { cleanAttachments } from '../utils/uploads.js';
 
 const PROFILE_FIELDS = [
   'headline', 'bio', 'categories', 'skills', 'languages', 'workType',
@@ -39,9 +40,7 @@ export const upsertMyProProfile = async (req, res) => {
       verified: verified.get(String(c._id)) ?? false,
     }));
   }
-  if (Array.isArray(data.portfolio)) {
-    data.portfolio = data.portfolio.map((a) => ({ ...a, uploadedBy: uid }));
-  }
+  if (data.portfolio !== undefined) data.portfolio = cleanAttachments(data.portfolio, uid);
 
   profile.set(data);
   setNested(profile, 'serviceArea', req.body?.serviceArea, ['location', 'radiusKm', 'municipalities']);

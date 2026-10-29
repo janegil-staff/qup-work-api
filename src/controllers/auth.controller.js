@@ -3,6 +3,7 @@ import { User, Company, ProProfile } from '../models/index.js';
 import { AppError } from '../utils/AppError.js';
 import { pick } from '../utils/http.js';
 import { issueTokens, verifyRefreshToken } from '../utils/tokens.js';
+import { cleanImageUrl } from '../utils/uploads.js';
 
 // POST /auth/register
 export const register = async (req, res) => {
@@ -79,6 +80,7 @@ export const getMe = async (req, res) => {
 // PATCH /auth/me
 export const updateMe = async (req, res) => {
   const data = pick(req.body, ['name', 'phone', 'avatarUrl', 'address', 'location', 'activeRole']);
+  if (data.avatarUrl !== undefined) data.avatarUrl = cleanImageUrl(data.avatarUrl, 'avatarUrl');
   if (data.activeRole === 'pro' && !req.user.roles.includes('pro')) {
     throw new AppError('Create a pro profile or company before switching to pro mode', 400);
   }

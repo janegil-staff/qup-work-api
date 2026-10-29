@@ -137,7 +137,7 @@ async function seedCompany(users) {
   if (!company) company = new Company({ owner: users.pro._id, name: 'Bergen Elektro AS' });
 
   company.set({
-    orgNumber: '999888777',
+    orgNumber: '999888771', // valid check digit (MOD11)
     orgForm: 'AS',
     vatRegistered: true,
     email: 'post@bergenelektro.test',

@@ -18,6 +18,7 @@ import invoiceRoutes from './invoice.routes.js';
 import paymentRoutes from './payment.routes.js';
 import notificationRoutes from './notification.routes.js';
 import uploadRoutes from './upload.routes.js';
+import geoRoutes from './geo.routes.js';
 
 const router = Router();
 
@@ -38,5 +39,6 @@ router.use('/invoices', invoiceRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/uploads', uploadRoutes);
+router.use('/geo', geoRoutes);
 
 export default router;

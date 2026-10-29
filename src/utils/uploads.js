@@ -45,6 +45,17 @@ export function createUploadSignature(userId, purpose = 'milestone') {
 const ATTACHMENT_FIELDS = ['url', 'key', 'kind', 'tag', 'name', 'mimeType', 'size', 'takenAt', 'location'];
 const MAX_ATTACHMENTS = 10;
 
+// A single image URL (avatar, logo): must be one of ours. Empty string/null clears it.
+export function cleanImageUrl(url, field = 'url') {
+  if (url === undefined) return undefined;
+  if (url === null || url === '') return null;
+  const prefix = cloudinaryReady() ? `https://res.cloudinary.com/${env.cloudinary.cloudName}/` : 'https://';
+  if (typeof url !== 'string' || !url.startsWith(prefix)) {
+    throw new AppError(`${field} must be uploaded through the app`, 400);
+  }
+  return url;
+}
+
 // Only files we uploaded ourselves: with Cloudinary set up, the URL must be in our cloud.
 // (Without it, any https URL is allowed so local testing still works.)
 export function cleanAttachments(list, uploadedBy) {

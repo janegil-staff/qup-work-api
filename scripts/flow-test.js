@@ -17,6 +17,16 @@ const BASE = process.env.API_URL ?? `http://localhost:${process.env.PORT ?? 4000
 const CLOUD = process.env.CLOUDINARY_CLOUD_NAME;
 const photoUrl = (name) =>
   CLOUD ? `https://res.cloudinary.com/${CLOUD}/image/upload/flow-test/${name}` : `https://example.com/${name}`;
+// A random organisation number with a valid MOD11 check digit (unique per run)
+function randomOrgNumber() {
+  for (;;) {
+    const d = Array.from({ length: 8 }, (_, i) => (i === 0 ? 8 + Math.floor(Math.random() * 2) : Math.floor(Math.random() * 10)));
+    const sum = [3, 2, 7, 6, 5, 4, 3, 2].reduce((s, w, i) => s + w * d[i], 0);
+    const check = 11 - (sum % 11);
+    if (check === 10) continue;
+    return d.join('') + (check === 11 ? 0 : check);
+  }
+}
 // The smallest possible PNG (1×1 pixel), for a real test upload
 const TINY_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -172,6 +182,115 @@ async function main() {
     check(data.companies.length === 1 && data.companies[0].role === 'owner', 'company/owner role missing');
   });
   if (sectionFailed) return; // nothing else can work without setup
+
+  // ---------------------------------------------------------------- Become a pro
+  section('🧭 Become a pro (the app\'s sign-up flow)');
+  await step('postcode lookup: 5003 → Bergen with a map position (Kartverket)', async () => {
+    const res = await api(null, 'GET', '/geo/postcode/5003');
+    if (res.status === 503) {
+      S.geoOff = true;
+      console.log('       ℹ️  Kartverket could not be reached, pros and jobs are saved without a map position');
+      return SKIPPED;
+    }
+    const data = expectStatus(res, 200);
+    check(data.place.city === 'Bergen', `city is ${data.place.city}`);
+    const [lng, lat] = data.place.location?.coordinates ?? [];
+    check(lng > 5 && lng < 5.6 && lat > 60.2 && lat < 60.5, `position is ${lng},${lat}`);
+    S.bergen = data.place;
+  });
+  await step('a postcode must have 4 digits (400)', async () => {
+    expectStatus(await api(null, 'GET', '/geo/postcode/12'), 400);
+  });
+  await step('register a new user who wants to become a pro', async () => {
+    await register('newpro', 'Ny Fagperson');
+  });
+  await step('an org number with a wrong check digit is refused (400)', async () => {
+    const res = await api(user('newpro').token, 'POST', '/companies', { name: 'Feil AS', orgForm: 'AS', orgNumber: '123456789' });
+    expectStatus(res, 400);
+    check(res.data?.error?.details?.orgNumber, 'error does not point at orgNumber');
+  });
+  await step('a bank account with a wrong check digit is refused (400)', async () => {
+    const res = await api(user('newpro').token, 'POST', '/companies', {
+      name: 'Feil AS',
+      orgForm: 'AS',
+      invoiceSettings: { bankAccount: '12345678901' },
+    });
+    expectStatus(res, 400);
+    check(res.data?.error?.details?.bankAccount, 'error does not point at bankAccount');
+  });
+  await step('create the company (org number and bank account with dots/spaces are cleaned)', async () => {
+    const org = randomOrgNumber();
+    const data = expectStatus(
+      await api(user('newpro').token, 'POST', '/companies', {
+        name: `Ny Fagperson ENK ${RUN}`,
+        orgForm: 'ENK',
+        orgNumber: `${org.slice(0, 3)} ${org.slice(3, 6)} ${org.slice(6)}`,
+        vatRegistered: false,
+        invoiceSettings: { bankAccount: '1234.56.78903', paymentTermsDays: 10, nextInvoiceNumber: 500 },
+      }),
+      201
+    );
+    S.newCompany = data.company._id;
+    check(data.company.orgNumber === org, `orgNumber stored as ${data.company.orgNumber}`);
+    check(data.company.invoiceSettings.bankAccount === '12345678903', 'bank account not cleaned');
+    check(data.company.invoiceSettings.nextInvoiceNumber === 1, 'the invoice counter could be changed');
+  });
+  await step('set up the pro profile and become visible to customers', async () => {
+    const data = expectStatus(
+      await api(user('newpro').token, 'PUT', '/pros/me', {
+        company: S.newCompany,
+        headline: 'Snekker i Bergen',
+        categories: S.category ? [S.category] : [],
+        workType: 'onsite',
+        hourlyRate: 85000,
+        availableForMarketplace: true,
+        serviceArea: {
+          location: S.bergen?.location ?? { type: 'Point', coordinates: [5.3221, 60.3913] },
+          radiusKm: 25,
+          municipalities: ['Bergen'],
+        },
+      }),
+      201
+    );
+    check(idOf(data.profile.company) === S.newCompany, 'profile not linked to the company');
+  });
+  await step('switch to pro mode, and the pro shows up in a search near Bergen', async () => {
+    const me = expectStatus(await api(user('newpro').token, 'PATCH', '/auth/me', { activeRole: 'pro' }), 200);
+    check(me.user.activeRole === 'pro', `activeRole is ${me.user.activeRole}`);
+    const found = expectStatus(await api(null, 'GET', '/pros?lng=5.33&lat=60.39&radiusKm=30&q=Snekker%20i%20Bergen&limit=50'), 200);
+    check(found.data.some((p) => idOf(p.user) === user('newpro').id), 'new pro not found near Bergen');
+  });
+  await step('saving the company again with the same numbers works', async () => {
+    const company = expectStatus(await api(user('newpro').token, 'GET', `/companies/${S.newCompany}`), 200).company;
+    expectStatus(
+      await api(user('newpro').token, 'PATCH', `/companies/${S.newCompany}`, {
+        name: company.name,
+        orgNumber: company.orgNumber,
+        invoiceSettings: { bankAccount: company.invoiceSettings.bankAccount, footerText: 'Takk!' },
+      }),
+      200
+    );
+  });
+  await step('a profile photo from another website is refused (400)', async () => {
+    // Only enforced when the server has Cloudinary set up; ask the server rather than guess
+    const sig = await api(user('newpro').token, 'POST', '/uploads/signature', { purpose: 'avatar' });
+    if (sig.status === 503) return SKIPPED;
+    expectStatus(await api(user('newpro').token, 'PATCH', '/auth/me', { avatarUrl: 'https://evil.example.com/me.jpg' }), 400);
+  });
+  await step('a new job with only a postcode gets a map position', async () => {
+    if (S.geoOff) return SKIPPED;
+    const data = expectStatus(
+      await api(user('customer').token, 'POST', '/jobs', {
+        title: 'Posisjonstest',
+        workType: 'onsite',
+        address: { postalCode: '5003' },
+      }),
+      201
+    );
+    check(data.job.location?.coordinates?.length === 2, 'no position was added');
+    check(data.job.address.city === 'Bergen', `city is ${data.job.address.city}`);
+    expectStatus(await api(user('customer').token, 'POST', `/jobs/${data.job._id}/cancel`), 200);
+  });
 
   // ---------------------------------------------------------------- Uploads
   section('📷 Photo uploads (Cloudinary)');

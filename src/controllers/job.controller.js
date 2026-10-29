@@ -5,6 +5,8 @@ import { pick, getPagination, paginate, geoFilter, escapeRegex } from '../utils/
 import {
   assertCompanyRole, defaultCompanyId, getMyCompanyIds, isJobOwner, loadClient, loadJob,
 } from '../utils/access.js';
+import { tryLookupPostcode } from '../utils/geo.js';
+import { cleanAttachments } from '../utils/uploads.js';
 
 const JOB_FIELDS = [
   'title', 'description', 'category', 'workType', 'address', 'location', 'images', 'budget', 'timing',
@@ -44,7 +46,19 @@ async function categoryFilter(param) {
   return { $in: [...ids, ...children.map((c) => c._id)] };
 }
 
-const withUploader = (images, uid) => images?.map((i) => ({ ...i, uploadedBy: uid }));
+// Only photos uploaded through the app (see utils/uploads.js)
+const withUploader = (images, uid) => cleanAttachments(images, uid);
+
+// On-site jobs with a postcode but no map position get one from Kartverket, so they
+// show up in "near me" searches. If the lookup fails the job is saved without it.
+async function fillPlaceFromPostcode(job) {
+  if (job.workType === 'remote' || job.location?.coordinates?.length || !job.address?.postalCode) return;
+  const place = await tryLookupPostcode(job.address.postalCode);
+  if (!place) return;
+  if (place.location) job.location = place.location;
+  if (!job.address.city && place.city) job.set('address.city', place.city);
+  if (!job.address.municipality && place.municipality) job.set('address.municipality', place.municipality);
+}
 
 // POST /jobs
 //   with "client" → direct job (pro registers work for their own client)
@@ -85,6 +99,7 @@ export const createJob = async (req, res) => {
     if (!body.visibility) job.visibility = 'public';
   }
 
+  await fillPlaceFromPostcode(job);
   await job.save();
   res.status(201).json({ job });
 };
@@ -193,6 +208,8 @@ export const updateJob = async (req, res) => {
   if (data.images) data.images = withUploader(data.images, req.user._id);
   job.set(data);
   if (job.source === 'marketplace') job.set(pick(req.body, MARKETPLACE_FIELDS));
+  if (data.address?.postalCode && !data.location) job.location = undefined; // moved: look it up again
+  await fillPlaceFromPostcode(job);
   await job.save();
   res.json({ job });
 };
