@@ -7,7 +7,7 @@ import { cleanAttachments } from '../utils/uploads.js';
 
 const PROFILE_FIELDS = [
   'headline', 'bio', 'categories', 'skills', 'languages', 'workType',
-  'hourlyRate', 'availableForMarketplace', 'portfolio', 'certificates', 'company',
+  'hourlyRate', 'availableForMarketplace', 'notifyNewJobs', 'portfolio', 'certificates', 'company',
 ];
 
 const profilePopulate = [

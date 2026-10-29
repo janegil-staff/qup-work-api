@@ -29,6 +29,10 @@ const TEXT = {
     invoice_received: (d) => ['New invoice', `Invoice no. ${d.invoiceNumber} from ${d.actorName}`],
     new_review: (d) => ['New review', `${d.actorName} gave you ${d.rating} of 5 for “${d.jobTitle}”`],
     new_message: (d) => [d.actorName, d.preview ?? 'Attachment'],
+    new_job_nearby: (d) => [
+      d.invited ? 'You were invited to a job' : d.remote ? 'New remote job' : 'New job near you',
+      d.place ? `“${d.jobTitle}” in ${d.place}` : `“${d.jobTitle}”`,
+    ],
   },
   nb: {
     new_offer: (d) => ['Nytt tilbud', `${d.actorName} har sendt et tilbud på «${d.jobTitle}»`],
@@ -49,6 +53,10 @@ const TEXT = {
     invoice_received: (d) => ['Ny faktura', `Faktura nr. ${d.invoiceNumber} fra ${d.actorName}`],
     new_review: (d) => ['Ny vurdering', `${d.actorName} ga deg ${d.rating} av 5 for «${d.jobTitle}»`],
     new_message: (d) => [d.actorName, d.preview ?? 'Vedlegg'],
+    new_job_nearby: (d) => [
+      d.invited ? 'Du er invitert til et oppdrag' : d.remote ? 'Nytt fjernoppdrag' : 'Nytt oppdrag i nærheten',
+      d.place ? `«${d.jobTitle}» i ${d.place}` : `«${d.jobTitle}»`,
+    ],
   },
 };
 

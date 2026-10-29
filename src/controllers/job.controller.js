@@ -8,6 +8,7 @@ import {
 import { tryLookupPostcode } from '../utils/geo.js';
 import { cleanAttachments } from '../utils/uploads.js';
 import { notify } from '../utils/notify.js';
+import { alertProsAboutJob } from '../utils/jobAlerts.js';
 
 const JOB_FIELDS = [
   'title', 'description', 'category', 'workType', 'address', 'location', 'images', 'budget', 'timing',
@@ -225,7 +226,8 @@ export const publishJob = async (req, res) => {
   job.status = 'open';
   job.publishedAt = new Date();
   await job.save();
-  // TODO (push step): notify pros nearby in this category
+  // Pros nearby in this category hear about it (in the background, so publishing stays fast)
+  alertProsAboutJob(job);
   res.json({ job });
 };
 

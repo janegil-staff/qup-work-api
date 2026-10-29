@@ -46,6 +46,8 @@ const proProfileSchema = new Schema(
 
     // Phase 2: only pros with this on show up in the marketplace
     availableForMarketplace: { type: Boolean, default: false },
+    // A notification + push when a matching job is published nearby (see utils/jobAlerts.js)
+    notifyNewJobs: { type: Boolean, default: true },
 
     stats: {
       ratingAvg: { type: Number, default: 0 },
